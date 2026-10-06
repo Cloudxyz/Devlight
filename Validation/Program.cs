@@ -5,7 +5,7 @@ using Devlight;
 
 namespace DevlightValidation;
 
-internal static class Validation
+internal static partial class Validation
 {
     private static int _checks;
     [STAThread]
@@ -18,6 +18,7 @@ internal static class Validation
         Directory.CreateDirectory(directory);
         try
         {
+            RestorationChecks();
             var store = new SettingsStore(Path.Combine(directory, "settings.json"));
             Check(!store.Load().IsValid, "missing settings");
             foreach (string content in new[] { "", "{", "null", "{\"Version\":99}", "{\"MonitorIdentity\":\"path\",\"Brightness\":101}" })
@@ -47,10 +48,12 @@ internal static class Validation
             catch (InvalidOperationException) { Check(true, "disconnected monitor handled"); }
             Complete(service.StopAsync());
             if (args.Contains("--desktop")) DesktopChecks(settings);
-            if (args.Contains("--hardware")) HardwareChecks(monitors.First(m => m.Supported));
             int processOption = Array.IndexOf(args, "--process");
+            if (args.Contains("--hardware") || args.Contains("--auto-hardware"))
+                HardwareChecks(monitors.First(m => m.Supported), args.Contains("--auto-hardware"),
+                    processOption >= 0 ? Path.GetFullPath(args[processOption + 1]) : null);
             if (processOption >= 0) ProcessChecks(Path.GetFullPath(args[processOption + 1]));
-            Console.WriteLine($"PASS: {_checks} checks. Hardware writes: {args.Contains("--hardware")}.");
+            Console.WriteLine($"PASS: {_checks} checks. Hardware writes: {args.Contains("--hardware") || args.Contains("--auto-hardware")}.");
             return 0;
         }
         catch (Exception exception) { Console.Error.WriteLine(exception); return 1; }
@@ -82,16 +85,19 @@ internal static class Validation
                 var compatible = combo.Items.Cast<MonitorChoice>().Where(m => m.Supported).ToList();
                 if (compatible.Count > 0)
                 {
-                    combo.SelectedItem = compatible[0];
+                    var fakeFirst = new MonitorChoice("validation-disconnected-one", "Validation monitor one", true, null);
+                    combo.Items.Add(fakeFirst);
+                    combo.SelectedItem = fakeFirst;
                     Field<NumericUpDown>(form, "_brightness").Value = 31;
                     Field<Button>(form, "_save").PerformClick();
-                    Check(store.Load().MonitorIdentity == compatible[0].Identity && store.Load().Brightness == 31
+                    Check(store.Load().MonitorIdentity == fakeFirst.Identity && store.Load().Brightness == 31
                         && Application.OpenForms.Count == 0, "settings save monitor/brightness and close");
                     typeof(TrayApplicationContext).GetMethod("ShowSettings", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(context, null);
                     form = Application.OpenForms.Cast<Form>().Single();
                     combo = Field<ComboBox>(form, "_monitors");
                     PumpUntil(() => combo.Items.Count > 0);
-                    var next = combo.Items.Cast<MonitorChoice>().Where(m => m.Supported).Last();
+                    var next = new MonitorChoice("validation-disconnected-two", "Validation monitor two", true, null);
+                    combo.Items.Add(next);
                     combo.SelectedItem = next;
                     Field<NumericUpDown>(form, "_brightness").Value = 72;
                     Field<Button>(form, "_save").PerformClick();
@@ -122,9 +128,11 @@ internal static class Validation
         }
     }
 
-    private static void HardwareChecks(MonitorChoice choice)
+    private static void HardwareChecks(MonitorChoice choice, bool automatic = false, string? executable = null)
     {
         var store = new SettingsStore();
+        var startup = new StartupRegistration();
+        string? originalStartup = startup.Read();
         byte[]? originalSettings = File.Exists(store.FilePath) ? File.ReadAllBytes(store.FilePath) : null;
         var logical = new List<IntPtr>();
         NativeMethods.MonitorCallback callback = (IntPtr h, IntPtr dc, ref NativeMethods.Rect r, IntPtr d) => { logical.Add(h); return true; };
@@ -157,6 +165,13 @@ internal static class Validation
             store.Save(new AppSettings { MonitorIdentity = choice.Identity, MonitorName = choice.Name, Brightness = percent });
             using (var context = new TrayApplicationContext())
             {
+                Application.RaiseIdle(EventArgs.Empty);
+                WaitForRestoration(context);
+                if (automatic)
+                {
+                    Check(ReadUntil(nativeHandle, expected), "startup automatically restores saved brightness without a click");
+                    Check(NativeMethods.SetMonitorBrightness(nativeHandle, originalBrightness) && ReadUntil(nativeHandle, originalBrightness), "change hardware brightness before manual click");
+                }
                 var tray = Field<NotifyIcon>(context, "_tray");
                 var mouseClick = typeof(NotifyIcon).GetMethod("OnMouseClick", BindingFlags.NonPublic | BindingFlags.Instance)
                     ?? throw new MissingMethodException("NotifyIcon.OnMouseClick");
@@ -165,7 +180,25 @@ internal static class Validation
                 Check(ReadUntil(nativeHandle, expected),
                     $"tray left-click handler hardware readback: {choice.Name}, {originalBrightness} -> {expected} (target {percent}%)");
                 Check(Application.OpenForms.Count == 0, "hardware apply opens no dialog");
+                if (automatic) AutomaticHardwareChecks(context, nativeHandle, choice, min, max, originalBrightness, percent);
                 Complete((Task)typeof(TrayApplicationContext).GetMethod("ExitAsync", BindingFlags.NonPublic | BindingFlags.Instance)!.Invoke(context, null)!);
+            }
+            if (automatic && executable is not null)
+            {
+                store.Save(new AppSettings { MonitorIdentity = choice.Identity, MonitorName = choice.Name, Brightness = percent });
+                Check(NativeMethods.SetMonitorBrightness(nativeHandle, originalBrightness) && ReadUntil(nativeHandle, originalBrightness), "change brightness while Devlight is closed");
+                using var process = Process.Start(new ProcessStartInfo(executable) { UseShellExecute = false, WindowStyle = ProcessWindowStyle.Hidden })!;
+                try
+                {
+                    Check(ReadUntil(nativeHandle, expected), "actual portable process startup restores saved hardware brightness");
+                    Check(!process.HasExited && VisibleWindows(process.Id).Count == 0, "actual automatic startup remains tray only");
+                }
+                finally
+                {
+                    uint thread = (uint)process.Threads.Cast<ProcessThread>().OrderBy(t => t.StartTime).First().Id;
+                    PostThreadMessage(thread, 0x12, IntPtr.Zero, IntPtr.Zero);
+                    if (!process.WaitForExit(10000)) process.Kill();
+                }
             }
         }
         catch (Exception exception) { Console.Error.WriteLine($"Hardware test failed before cleanup: {exception}"); throw; }
@@ -188,6 +221,7 @@ internal static class Validation
             }
             finally
             {
+                startup.Restore(originalStartup);
                 if (originalSettings is null) { if (File.Exists(store.FilePath)) File.Delete(store.FilePath); }
                 else File.WriteAllBytes(store.FilePath, originalSettings);
             }

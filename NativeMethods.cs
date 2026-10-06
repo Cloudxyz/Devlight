@@ -4,6 +4,25 @@ namespace Devlight;
 
 internal static class NativeMethods
 {
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct DeviceInterfaceFilter
+    {
+        public uint Size, DeviceType, Reserved;
+        public Guid ClassGuid;
+        public char Name;
+    }
+
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern IntPtr RegisterPowerSettingNotification(IntPtr window, ref Guid setting, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnregisterPowerSettingNotification(IntPtr registration);
+    [DllImport("user32.dll", EntryPoint = "RegisterDeviceNotificationW", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr RegisterDeviceNotification(IntPtr window, ref DeviceInterfaceFilter filter, uint flags);
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool UnregisterDeviceNotification(IntPtr registration);
+
     [StructLayout(LayoutKind.Sequential)]
     internal struct Rect { public int Left, Top, Right, Bottom; }
 

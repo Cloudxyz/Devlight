@@ -1,4 +1,24 @@
-# Validation — 2026-10-06
+# Validation — automatic restoration, 2026-10-06
+
+## Feature delta
+
+Final combined validation: **69 checks passed**, including real hardware and the published executable.
+
+- Debug and Release builds: zero warnings/errors.
+- Self-contained single-file `win-x64` publication: passed. The initially running previous executable was closed to release the output file before publication.
+- Shared restoration worker: temporary failures recover, success stops retrying, exhausted failures stop silently, event bursts coalesce, manual requests supersede automatic work, updated settings replace old targets, and stopping cancels delayed work.
+- Native power/monitor registrations succeeded. Simulated resume, display, monitor interface arrival, topology and session display-on messages reached detection; unrelated device arrivals and display-off messages did not request restoration. Disposal removed the hidden native window.
+- Original manual apply, first-run Settings, Settings persistence, HKCU startup toggling, tray-only restart, duplicate-process rejection and clean exit remain covered.
+
+Physical FY27QHC-B validation used an original brightness of **14**. Startup restored the saved **30** without a click. After resetting the hardware, the manual left-click handler restored **30**. Simulated display-change, resume and monitor-arrival notifications each restored **30** through the same native operation. Saving **32** in Settings applied it immediately, and the next simulated resume used **32**. The actual published executable, launched after brightness was changed while Devlight was closed, automatically restored saved **30** with no visible window. Original hardware **14**, configuration and startup registration were restored afterward.
+
+Saving an unavailable identity started a bounded silent sequence; application Exit canceled that pending sequence and removed the tray icon. Delayed hardware readiness was modeled with controlled operation failures followed by success; the monitor was not physically made unresponsive. A later hardware power-on with no Windows event is detectable only within the active retry window, otherwise a new event or manual click is needed.
+
+Physical sleep, hibernation, login/reboot, monitor power-button wake and cable disconnect/reconnect were not induced. Those scenarios still require manual acceptance testing. Resume/display/reconnect **message handling with real brightness writes** was tested; this is not a claim of a physical suspend or reconnect cycle.
+
+Affected files: `BrightnessRestorer.cs`, `DisplayEventWindow.cs`, `TrayApplicationContext.cs`, `MonitorService.cs`, `NativeMethods.cs`, `SettingsForm.cs`, `Validation/Program.cs`, `Validation/RestorationChecks.cs`, `Validation/AutomaticHardwareChecks.cs`, `README.md`, `VALIDATION.md`.
+
+## Initial release validation — 2026-10-06
 
 Validated on the available Windows x64 desktop with .NET SDK 10.0.401.
 

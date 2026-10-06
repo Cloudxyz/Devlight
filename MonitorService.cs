@@ -32,7 +32,7 @@ internal sealed class MonitorService
         }).ToList();
     });
 
-    internal Task ApplyAsync(AppSettings settings) => RunAsync(() =>
+    internal Task ApplyAsync(AppSettings settings, CancellationToken cancellationToken = default) => RunAsync(() =>
     {
         using var snapshot = Capture();
         var matches = snapshot.Monitors.Where(m => MonitorIdentity.Matches(settings.MonitorIdentity!, m.Identity)).ToList();
@@ -43,13 +43,14 @@ internal sealed class MonitorService
         var monitor = matches[0];
         if (!TryBrightness(monitor.Handle!.Value, out uint min, out uint max, out string? problem))
             throw new InvalidOperationException($"{monitor.Name}: {problem}. Wake the monitor and enable DDC/CI in its OSD.");
+        cancellationToken.ThrowIfCancellationRequested();
         if (!NativeMethods.SetMonitorBrightness(monitor.Handle.Value, ToNativeBrightness(settings.Brightness, min, max)))
         {
             LogNative("SetMonitorBrightness");
             throw new InvalidOperationException("The monitor did not accept brightness. Wake it, check DDC/CI, and try again.");
         }
         return true;
-    });
+    }, cancellationToken);
 
     internal static uint ToNativeBrightness(int percentage, uint minimum, uint maximum)
     {
@@ -58,13 +59,13 @@ internal sealed class MonitorService
             MidpointRounding.AwayFromZero);
     }
 
-    private async Task<T> RunAsync<T>(Func<T> action)
+    private async Task<T> RunAsync<T>(Func<T> action, CancellationToken cancellationToken = default)
     {
-        await _gate.WaitAsync();
+        await _gate.WaitAsync(cancellationToken).ConfigureAwait(false);
         try
         {
             if (_stopping) throw new OperationCanceledException();
-            return await Task.Run(action);
+            return await Task.Run(action, cancellationToken).ConfigureAwait(false);
         }
         finally { _gate.Release(); }
     }
@@ -72,7 +73,7 @@ internal sealed class MonitorService
     internal async Task StopAsync()
     {
         _stopping = true;
-        await _gate.WaitAsync();
+        await _gate.WaitAsync().ConfigureAwait(false);
         _gate.Release();
     }
 

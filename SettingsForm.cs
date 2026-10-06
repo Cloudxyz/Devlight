@@ -71,7 +71,7 @@ internal sealed class SettingsForm : Form
     {
         var choice = _monitors.SelectedItem as MonitorChoice;
         _save.Enabled = choice?.Supported == true && !string.IsNullOrWhiteSpace(choice.Identity);
-        _status.Text = choice is { Supported: true } ? "Save, then click the tray icon to apply brightness."
+        _status.Text = choice is { Supported: true } ? "Save to apply brightness and restore it automatically."
             : choice?.Problem ?? (_monitors.Items.Count == 0 ? "No monitors found. Enable DDC/CI in your monitor's OSD and reopen Settings."
                 : "Select a compatible monitor. The saved monitor may be disconnected.");
     }
