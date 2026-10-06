@@ -26,7 +26,7 @@ internal sealed class TrayApplicationContext : ApplicationContext
             SynchronizationContext.SetSynchronizationContext(new WindowsFormsSynchronizationContext());
         _settings = _store.Load();
         _restorer = new BrightnessRestorer(_monitors.ApplyAsync);
-        using var resource = typeof(Program).Assembly.GetManifestResourceStream("Devlight.Assets.Devlight.ico")!;
+        using var resource = typeof(Program).Assembly.GetManifestResourceStream("Devlight.Assets.DevLight.ico")!;
         _icon = new Icon(resource);
         _tray = new NotifyIcon { Icon = _icon, Text = "Devlight", ContextMenuStrip = _menu, Visible = true };
         _menu.Items.Add(_apply);
